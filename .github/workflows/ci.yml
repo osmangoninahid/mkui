@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      # macOS matters: BSD userland, a different default locale, and it is where
+      # most users are. Run both legs even if one fails, so a macOS-only break
+      # is not hidden by a green Linux run.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: make check
+        run: make check
+
+      # Exercise the ASCII / NO_COLOR path on its own. It only triggers on
+      # machines the author is not using, so it rots silently unless forced.
+      - name: ASCII path
+        run: MKUI_ASCII=1 NO_COLOR=1 go test ./...
+
+      # Self-host: mkui parses its own Makefile, so building it and listing the
+      # targets is a live end-to-end test. Grep for a known documented target so
+      # a silently-empty or mangled listing fails the job.
+      - name: Self-host smoke test
+        run: |
+          make build
+          ./bin/mkui --list
+          ./bin/mkui --list | grep -qE '^build[[:space:]]+Compile the binary'
