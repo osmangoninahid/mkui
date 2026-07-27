@@ -78,8 +78,9 @@ attaches them to a GitHub release, and opens a commit on your tap repo.
 
 One-time setup:
 
-1. Create a public repo named `homebrew-tap` under your account.
-2. Create a classic PAT with `repo` scope on it.
+1. Create a public `homebrew-tap` repo under your account, or reuse an existing
+   one — a single tap can host many tools' casks and formulas.
+2. Create a classic PAT with `repo` scope on the tap.
 3. Add it to this repo as the `HOMEBREW_TAP_GITHUB_TOKEN` secret.
 
 Then:
