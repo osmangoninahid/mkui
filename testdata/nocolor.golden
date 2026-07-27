@@ -1,0 +1,8 @@
+mkui  /home/you/project/Makefile
+
+  build     Compile the binary
+▸ déployer  Déployer en production — avec vérification        
+  测试      Run the test suite
+  main.o
+
+up/down move · enter run · / filter · q quit   4/4

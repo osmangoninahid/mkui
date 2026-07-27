@@ -1,0 +1,8 @@
+\e[1;36mmkui\e[0m  \e[90m/home/you/project/Makefile\e[0m
+
+  build     \e[90mCompile the binary\e[0m
+\e[1;7m▸ déployer  Déployer en production — avec vérification        \e[0m
+  测试      \e[90mRun the test suite\e[0m
+  main.o
+
+\e[90mup/down move · enter run · / filter · q quit   4/4\e[0m
