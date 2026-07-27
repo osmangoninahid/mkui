@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt check fmt-check vet palette-check demo clean
+.PHONY: build test fmt check fmt-check vet palette-check demo clean
 
 build: ## Compile the binary
 	go build -o bin/mkui .
