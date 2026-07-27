@@ -101,7 +101,16 @@ func targetsFromDatabase(dir string) ([]Target, error) {
 	if len(out) == 0 {
 		return nil, errors.New("make produced no rule database")
 	}
+	return parseDatabase(out)
+}
 
+// parseDatabase extracts targets from the text of a `make -pRrq` dump. It is
+// split from targetsFromDatabase (which only supplies the bytes) so the marker
+// handling below can be tested against a fixed database. The exact
+// "# Not a target:" + rejected-rule + real-target sequence that invariant #5
+// guards against does not occur in any ordering real make emits on its own, so
+// a fixture makefile cannot reach it; a fixed database can.
+func parseDatabase(out []byte) ([]Target, error) {
 	var (
 		targets  []Target
 		inFiles  bool
