@@ -1,0 +1,61 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: mkui
+    main: .
+    binary: mkui
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: mkui
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+# Publishes into github.com/osmangoninahid/homebrew-tap, giving users:
+#   brew install osmangoninahid/tap/mkui
+#
+# `brews:` (formulas) still works but has been deprecated since GoReleaser
+# v2.10 in favour of casks, which is the correct type for a pre-compiled
+# binary.
+homebrew_casks:
+  - name: mkui
+    repository:
+      owner: osmangoninahid
+      name: homebrew-tap
+      # A classic PAT with `repo` scope on the tap repository. The default
+      # GITHUB_TOKEN cannot push to another repo.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/osmangoninahid/mkui
+    description: Browse and run Makefile targets from a TUI
+    license: MIT
+    # Helps `brew audit` when the homepage domain differs from the download.
+    url:
+      verified: github.com/osmangoninahid/mkui
+    # Unsigned binaries are quarantined by Gatekeeper on download, so macOS
+    # refuses to run them until the attribute is stripped. Drop this block
+    # once you sign and notarize.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr",
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/mkui"]
+          end
