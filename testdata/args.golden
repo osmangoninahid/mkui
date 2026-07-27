@@ -5,4 +5,5 @@ mkui  /home/you/project/Makefile
   测试      Run the test suite
   main.o
 
-up/down move · enter run · a args · / filter · q quit   4/4
+make déployer ENV=staging▖
+vars: ENV REGION TAG

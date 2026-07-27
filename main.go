@@ -27,7 +27,7 @@ func main() {
 		fail(err)
 	}
 
-	targets, err := LoadTargets(dir, name)
+	targets, vars, err := LoadTargets(dir, name)
 	if err != nil {
 		fail(err)
 	}
@@ -48,7 +48,7 @@ func main() {
 		return
 	}
 
-	mdl := NewModel(dir, name, targets)
+	mdl := NewModel(dir, name, targets, vars)
 	if *brandMode {
 		mdl.theme = NewBrandTheme()
 	}

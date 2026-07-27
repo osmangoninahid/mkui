@@ -44,14 +44,15 @@ func FindMakefile(start string) (dir, name string, err error) {
 }
 
 // LoadTargets returns every target make knows about, annotated with `##` docs.
-func LoadTargets(dir, name string) ([]Target, error) {
-	targets, makefiles, err := targetsFromDatabase(dir)
+func LoadTargets(dir, name string) ([]Target, []string, error) {
+	db, err := targetsFromDatabase(dir)
+	targets, makefiles, vars := db.targets, db.makefiles, db.vars
 	if err != nil || len(targets) == 0 {
 		// make is missing or the makefile has an error; degrade to a plain
-		// scan of the file. Misses includes and generated targets, but it is
-		// better than showing nothing.
+		// scan of the file. Misses includes, generated targets and the
+		// variable list, but it is better than showing nothing.
 		targets = targetsFromFile(filepath.Join(dir, name))
-		makefiles = nil
+		makefiles, vars = nil, nil
 	}
 
 	// Always scan the top-level file, plus every makefile make reported
@@ -70,7 +71,7 @@ func LoadTargets(dir, name string) ([]Target, error) {
 		}
 		return targets[i].Name < targets[j].Name
 	})
-	return targets, nil
+	return targets, vars, nil
 }
 
 var (
@@ -95,17 +96,32 @@ var (
 // Caveat worth knowing: -p still *evaluates* the makefile, so any `$(shell
 // ...)` at parse time does execute. That is make's behaviour, not ours, but
 // it means mkui is not safe to point at a makefile you do not trust.
-func targetsFromDatabase(dir string) ([]Target, []string, error) {
+// makeDB is everything one `make -pRrq` dump yields: the targets, the set of
+// makefiles that contributed rules (for doc scanning), and the makefile-defined
+// variables offered as override candidates. Grouping them keeps the single make
+// invocation as the one source and avoids threading three slices plus an error
+// through the caller.
+type makeDB struct {
+	targets   []Target
+	makefiles []string
+	vars      []string
+}
+
+func targetsFromDatabase(dir string) (makeDB, error) {
 	cmd := exec.Command("make", "-pRrq", "--no-print-directory")
 	cmd.Dir = dir
 	// -q exits 1 when targets are out of date, which is the normal case here,
 	// so the exit code is deliberately ignored; empty output is the real error.
 	out, _ := cmd.Output()
 	if len(out) == 0 {
-		return nil, nil, errors.New("make produced no rule database")
+		return makeDB{}, errors.New("make produced no rule database")
 	}
 	targets, err := parseDatabase(out)
-	return targets, makefilesFromDatabase(out), err
+	return makeDB{
+		targets:   targets,
+		makefiles: makefilesFromDatabase(out),
+		vars:      variablesFromDatabase(out),
+	}, err
 }
 
 // parseDatabase extracts targets from the text of a `make -pRrq` dump. It is
@@ -200,6 +216,62 @@ func makefilesFromDatabase(out []byte) []string {
 		}
 	}
 	return files
+}
+
+// A variable definition in the database: a name followed by any make
+// assignment operator. The name must start with a letter or underscore, which
+// also drops the dot-prefixed specials (.DEFAULT_GOAL, .VARIABLES, ...).
+var varAssignRe = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*(?:::=|:=|\?=|\+=|=)`)
+
+// make maintains these itself and prints them with a `# makefile` origin as if
+// the user had written them; they are not knobs anyone means to override.
+var notAKnob = map[string]bool{
+	"CURDIR": true, "SHELL": true, "MAKEFILE_LIST": true, "MAKEFLAGS": true,
+	"MFLAGS": true, "GNUMAKEFLAGS": true, "SUFFIXES": true, "VPATH": true,
+	"GPATH": true, "MAKE": true, "MAKELEVEL": true, "MAKECMDGOALS": true,
+}
+
+// variablesFromDatabase returns the makefile-defined variables, sorted, to
+// offer as `VAR=value` override candidates.
+//
+// make prints each variable under an origin comment — `# makefile`,
+// `# environment`, `# automatic`, `# default`. Only `# makefile` marks one the
+// author set, so environment (PATH, HOME) and automatic ($@, $<) noise is
+// dropped by the origin, and make's own bookkeeping by notAKnob. Variables are
+// printed before the `# Files` section, so we stop there: past it the same
+// origin comments belong to target-specific and automatic variables.
+func variablesFromDatabase(out []byte) []string {
+	var vars []string
+	seen := map[string]bool{}
+	fromMakefile := false
+
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(line, "# Files") {
+			break
+		}
+		if strings.HasPrefix(line, "#") {
+			// An origin comment. `# makefile` covers `# makefile (from ...)`.
+			fromMakefile = strings.HasPrefix(line, "# makefile")
+			continue
+		}
+		// The line after the origin is the assignment. Consume the origin
+		// whether or not this line turns out to be one, so it cannot leak onto
+		// a later variable.
+		if fromMakefile {
+			if m := varAssignRe.FindStringSubmatch(line); m != nil {
+				if name := m[1]; !notAKnob[name] && !seen[name] {
+					seen[name] = true
+					vars = append(vars, name)
+				}
+			}
+		}
+		fromMakefile = false
+	}
+	sort.Strings(vars)
+	return vars
 }
 
 var fileTargetRe = regexp.MustCompile(`^([A-Za-z0-9_][A-Za-z0-9_./+-]*)\s*::?([^=]|$)`)

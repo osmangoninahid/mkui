@@ -99,7 +99,7 @@ func TestLoadTargets(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := writeFixture(t, tc.files)
-			targets, err := LoadTargets(dir, "Makefile")
+			targets, _, err := LoadTargets(dir, "Makefile")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,6 +118,42 @@ func TestLoadTargets(t *testing.T) {
 	}
 }
 
+// TestVariablesFromDatabase checks that the override candidates are the
+// makefile-authored variables only: environment (PATH, HOME) and automatic
+// noise is dropped by the origin filter, and make's own bookkeeping (CURDIR,
+// SHELL, MAKEFILE_LIST) by the denylist.
+func TestVariablesFromDatabase(t *testing.T) {
+	requireMake(t)
+
+	dir := writeFixture(t, map[string]string{
+		"Makefile": "ENV ?= dev\n" +
+			"REGION := us-east-1\n" +
+			"TAG = latest\n" +
+			"COMPUTED := $(shell echo hi)\n" +
+			"_INTERNAL := x\n" +
+			"deploy: ## Deploy\n\t@echo $(ENV) $(REGION) $(TAG)\n",
+	})
+
+	_, vars, err := LoadTargets(dir, "Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, v := range vars {
+		got[v] = true
+	}
+	for _, want := range []string{"ENV", "REGION", "TAG", "COMPUTED", "_INTERNAL"} {
+		if !got[want] {
+			t.Errorf("variable %q missing from candidates; got %v", want, vars)
+		}
+	}
+	for _, bad := range []string{"CURDIR", "SHELL", "MAKEFILE_LIST", "PATH", "HOME"} {
+		if got[bad] {
+			t.Errorf("%q is make/environment noise and must not be offered; got %v", bad, vars)
+		}
+	}
+}
+
 // TestLoadTargetsIncludedTargetKeepsDoc covers the regression where a target
 // pulled in from an `include`d makefile appeared in the list but lost its `##`
 // description, because docs were only read from the top-level file. The set of
@@ -133,7 +169,7 @@ func TestLoadTargetsIncludedTargetKeepsDoc(t *testing.T) {
 		"sub/extra.mk": "lint: ## Static checks\n\t@echo lint\n",
 	})
 
-	targets, err := LoadTargets(dir, "Makefile")
+	targets, _, err := LoadTargets(dir, "Makefile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +232,7 @@ func TestLoadTargetsFallsBackWhenMakeAbsent(t *testing.T) {
 
 	t.Setenv("PATH", "") // make is now unresolvable, forcing the file scan
 
-	targets, err := LoadTargets(dir, "Makefile")
+	targets, _, err := LoadTargets(dir, "Makefile")
 	if err != nil {
 		t.Fatal(err)
 	}

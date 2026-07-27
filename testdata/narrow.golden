@@ -5,4 +5,4 @@
   测试      \e[90mRun the test suite\e[0m
   main.o
 
-\e[90mup/down move · enter run · / filter · q quit   4/4\e[0m
+\e[90mup/down move · enter run · a args · / filter · q quit   4/4\e[0m

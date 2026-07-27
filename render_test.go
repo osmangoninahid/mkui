@@ -25,14 +25,20 @@ func fixtureTargets() []Target {
 	}
 }
 
-// renderCase renders the fixture UI at a given color profile and width. The
-// color profile is global lipgloss state, so cases run sequentially, not in
-// parallel.
-func renderCase(profile termenv.Profile, width, height int) string {
-	lipgloss.SetColorProfile(profile)
-	m := NewModel("/home/you/project", "Makefile", fixtureTargets())
-	m.width, m.height = width, height
+// fixtureVars are the override candidates shown as a hint in the arg prompt.
+func fixtureVars() []string { return []string{"ENV", "REGION", "TAG"} }
+
+// renderCase renders the fixture UI for one case. The color profile is global
+// lipgloss state, so cases run sequentially, not in parallel.
+func renderCase(tc renderCaseSpec) string {
+	lipgloss.SetColorProfile(tc.profile)
+	m := NewModel("/home/you/project", "Makefile", fixtureTargets(), fixtureVars())
+	m.width, m.height = tc.width, 12
 	m.cursor = 1
+	if tc.argsMode {
+		m.argsOn = true
+		m.args = tc.args
+	}
 	return m.View()
 }
 
@@ -43,21 +49,28 @@ func escapeANSI(s string) string {
 	return strings.ReplaceAll(s, "\x1b", `\e`)
 }
 
-var renderCases = []struct {
-	name    string
-	profile termenv.Profile
-	width   int
-}{
-	{"truecolor", termenv.TrueColor, 62},
-	{"ansi256", termenv.ANSI256, 62},
-	{"ansi16", termenv.ANSI, 62},
+type renderCaseSpec struct {
+	name     string
+	profile  termenv.Profile
+	width    int
+	argsMode bool
+	args     string
+}
+
+var renderCases = []renderCaseSpec{
+	{name: "truecolor", profile: termenv.TrueColor, width: 62},
+	{name: "ansi256", profile: termenv.ANSI256, width: 62},
+	{name: "ansi16", profile: termenv.ANSI, width: 62},
 	// NO_COLOR is the Ascii profile: reverse video is stripped, so the ▸ glyph
 	// is the only remaining marker of the selected row (invariant 3). The glyph
 	// stays Unicode here because the locale is UTF-8 — NO_COLOR is about color,
 	// not glyphs.
-	{"nocolor", termenv.Ascii, 62},
+	{name: "nocolor", profile: termenv.Ascii, width: 62},
 	// A width that forces the doc column to truncate on a cell boundary.
-	{"narrow", termenv.ANSI256, 34},
+	{name: "narrow", profile: termenv.ANSI256, width: 34},
+	// The arg prompt with a typed VAR=value and the candidate hint, rendered
+	// under NO_COLOR so the prompt is verified to stay legible as plain text.
+	{name: "args", profile: termenv.Ascii, width: 62, argsMode: true, args: "ENV=staging"},
 }
 
 func TestRenderGolden(t *testing.T) {
@@ -72,7 +85,7 @@ func TestRenderGolden(t *testing.T) {
 
 	for _, tc := range renderCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := escapeANSI(renderCase(tc.profile, tc.width, 12))
+			got := escapeANSI(renderCase(tc))
 			golden := filepath.Join("testdata", tc.name+".golden")
 
 			if *update {
