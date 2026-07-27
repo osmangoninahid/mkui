@@ -14,7 +14,11 @@ func writeFixture(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -99,6 +103,40 @@ func TestLoadTargets(t *testing.T) {
 	}
 }
 
+// TestLoadTargetsIncludedTargetKeepsDoc covers the regression where a target
+// pulled in from an `include`d makefile appeared in the list but lost its `##`
+// description, because docs were only read from the top-level file. The set of
+// makefiles to scan is taken from make's own database, including a subdir path.
+func TestLoadTargetsIncludedTargetKeepsDoc(t *testing.T) {
+	requireMake(t)
+
+	dir := writeFixture(t, map[string]string{
+		"Makefile": "include common.mk\n" +
+			"include sub/extra.mk\n" +
+			"build: ## Compile the binary\n\t@echo build\n",
+		"common.mk":    "deploy: ## Ship it to prod\n\t@echo deploy\n",
+		"sub/extra.mk": "lint: ## Static checks\n\t@echo lint\n",
+	})
+
+	targets, err := LoadTargets(dir, "Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, tg := range targets {
+		got[tg.Name] = tg.Doc
+	}
+	for name, want := range map[string]string{
+		"build":  "Compile the binary", // top-level
+		"deploy": "Ship it to prod",    // from common.mk
+		"lint":   "Static checks",      // from sub/extra.mk
+	} {
+		if got[name] != want {
+			t.Errorf("doc for %q = %q, want %q", name, got[name], want)
+		}
+	}
+}
+
 // TestParseDatabaseNotATargetDoesNotSwallowNextTarget guards invariant #5: a
 // "# Not a target:" marker must be cleared by the *next* rule-shaped line even
 // when the name filter rejects that line (.DEFAULT here). An earlier version
@@ -167,7 +205,7 @@ func TestParseDocs(t *testing.T) {
 			"# commented: ## not a real doc\n",
 	})
 
-	docs := parseDocs(filepath.Join(dir, "Makefile"))
+	docs := parseDocs(dir, []string{"Makefile"})
 
 	for name, want := range map[string]string{
 		"build":  "Compile the binary",

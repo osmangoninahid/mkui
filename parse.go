@@ -45,15 +45,18 @@ func FindMakefile(start string) (dir, name string, err error) {
 
 // LoadTargets returns every target make knows about, annotated with `##` docs.
 func LoadTargets(dir, name string) ([]Target, error) {
-	targets, err := targetsFromDatabase(dir)
+	targets, makefiles, err := targetsFromDatabase(dir)
 	if err != nil || len(targets) == 0 {
 		// make is missing or the makefile has an error; degrade to a plain
 		// scan of the file. Misses includes and generated targets, but it is
 		// better than showing nothing.
 		targets = targetsFromFile(filepath.Join(dir, name))
+		makefiles = nil
 	}
 
-	docs := parseDocs(filepath.Join(dir, name))
+	// Always scan the top-level file, plus every makefile make reported
+	// reading, so a target defined in an `include`d file keeps its `##` doc.
+	docs := parseDocs(dir, append([]string{name}, makefiles...))
 	for i := range targets {
 		targets[i].Doc = docs[targets[i].Name]
 	}
@@ -92,16 +95,17 @@ var (
 // Caveat worth knowing: -p still *evaluates* the makefile, so any `$(shell
 // ...)` at parse time does execute. That is make's behaviour, not ours, but
 // it means mkui is not safe to point at a makefile you do not trust.
-func targetsFromDatabase(dir string) ([]Target, error) {
+func targetsFromDatabase(dir string) ([]Target, []string, error) {
 	cmd := exec.Command("make", "-pRrq", "--no-print-directory")
 	cmd.Dir = dir
 	// -q exits 1 when targets are out of date, which is the normal case here,
 	// so the exit code is deliberately ignored; empty output is the real error.
 	out, _ := cmd.Output()
 	if len(out) == 0 {
-		return nil, errors.New("make produced no rule database")
+		return nil, nil, errors.New("make produced no rule database")
 	}
-	return parseDatabase(out)
+	targets, err := parseDatabase(out)
+	return targets, makefilesFromDatabase(out), err
 }
 
 // parseDatabase extracts targets from the text of a `make -pRrq` dump. It is
@@ -167,6 +171,37 @@ func parseDatabase(out []byte) ([]Target, error) {
 	return targets, sc.Err()
 }
 
+// make annotates every recipe with the makefile it came from:
+//
+//	#  commands to execute (from `common.mk', line 5):
+//
+// Newer make says "recipe to execute" and uses straight quotes; the quote
+// char before the name is matched loosely to cover both. The opening `'` is a
+// backtick on older make, so the leading quote is left unanchored.
+var fromRe = regexp.MustCompile(`\(from .(.+?)', line \d+\):`)
+
+// makefilesFromDatabase returns every makefile make reported reading, read off
+// the "(from ...)" recipe annotations. This is how docs from `include`d files
+// are located without re-implementing make's include search over the text: the
+// database already resolved every include, generated file and computed path.
+func makefilesFromDatabase(out []byte) []string {
+	var files []string
+	seen := map[string]bool{}
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		m := fromRe.FindSubmatch(sc.Bytes())
+		if m == nil {
+			continue
+		}
+		if f := string(m[1]); !seen[f] {
+			seen[f] = true
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
 var fileTargetRe = regexp.MustCompile(`^([A-Za-z0-9_][A-Za-z0-9_./+-]*)\s*::?([^=]|$)`)
 
 // targetsFromFile is the fallback scan used when make is unavailable.
@@ -202,11 +237,26 @@ func targetsFromFile(path string) []Target {
 //	build: ## Compile the binary
 var docRe = regexp.MustCompile(`^([A-Za-z0-9_][A-Za-z0-9_./+-]*)\s*::?[^#]*##\s?(.*)$`)
 
-func parseDocs(path string) map[string]string {
+// parseDocs merges `## ` docs from every given makefile (each relative to
+// dir), deduping repeats. Passing the included files, not just the top-level
+// one, is what lets a target defined in an `include`d makefile keep its doc.
+func parseDocs(dir string, makefiles []string) map[string]string {
 	docs := map[string]string{}
+	seen := map[string]bool{}
+	for _, mf := range makefiles {
+		if seen[mf] {
+			continue
+		}
+		seen[mf] = true
+		parseDocsInto(filepath.Join(dir, mf), docs)
+	}
+	return docs
+}
+
+func parseDocsInto(path string, docs map[string]string) {
 	f, err := os.Open(path)
 	if err != nil {
-		return docs
+		return
 	}
 	defer f.Close()
 
@@ -217,5 +267,4 @@ func parseDocs(path string) map[string]string {
 			docs[m[1]] = strings.TrimSpace(m[2])
 		}
 	}
-	return docs
 }
