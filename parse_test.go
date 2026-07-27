@@ -81,6 +81,21 @@ func TestLoadTargets(t *testing.T) {
 			want:   []string{"build", "concrete.o"},
 			absent: []string{"%.o", ".PHONY", ".SUFFIXES", ".DEFAULT", "Makefile"},
 		},
+		{
+			// Double-colon rules are legal make; each `::` entry is independent.
+			// make emits them as `archive::`, so the name filter must accept the
+			// second colon or the target vanishes from the list. The plain
+			// `build:` target keeps the database parse non-empty, so a name-filter
+			// regression cannot hide behind the file-scan fallback (which has its
+			// own `::?` and would otherwise mask it).
+			name: "double-colon rules are offered",
+			files: map[string]string{
+				"Makefile": "build:\n\t@echo b\n" +
+					"archive:: ## first half\n\t@echo one\n" +
+					"archive:: ## second half\n\t@echo two\n",
+			},
+			want: []string{"build", "archive"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := writeFixture(t, tc.files)
@@ -195,11 +210,15 @@ func TestLoadTargetsFallsBackWhenMakeAbsent(t *testing.T) {
 }
 
 // TestParseDocs covers `## ` doc extraction, including that prerequisites before
-// the comment are ignored and that a `#`-commented line is not mistaken for a
-// documented target.
+// the comment are ignored, that a `#`-commented line is not mistaken for a
+// documented target, and that a `#`/`##` appearing inside a recipe does not
+// leak in as a doc — the recipe lines below look exactly like doc lines but are
+// tab-indented, and only a start-of-line rule may carry a doc.
 func TestParseDocs(t *testing.T) {
 	dir := writeFixture(t, map[string]string{
-		"Makefile": "build: ## Compile the binary\n\t@echo b\n" +
+		"Makefile": "build: ## Compile the binary\n" +
+			"\t@echo '# a bare hash in the recipe'\n" +
+			"\t@echo 'build: ## a fake doc echoed by the recipe'\n" +
 			"deploy: dep1 dep2 ## Ship it\n\t@echo d\n" +
 			"nodoc:\n\t@echo n\n" +
 			"# commented: ## not a real doc\n",
@@ -208,6 +227,7 @@ func TestParseDocs(t *testing.T) {
 	docs := parseDocs(dir, []string{"Makefile"})
 
 	for name, want := range map[string]string{
+		// The real doc, not the "fake doc" the recipe's second line echoes.
 		"build":  "Compile the binary",
 		"deploy": "Ship it",
 	} {
