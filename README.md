@@ -1,8 +1,9 @@
 # mkui
 
-A TUI for your Makefile. Run `mkui` in any repo with a Makefile and get a
-searchable, keyboard-driven list of every target, with `##` comments shown as
-descriptions.
+**Browse and run your Makefile targets from a menu.** Instead of remembering
+target names and typing `make <something>`, run `mkui` in any repo with a
+Makefile: it lists every target, lets you filter by typing, and runs the one
+you pick. A single static binary, installed with one Homebrew command.
 
 ```
 mkui  /Users/you/project/Makefile
@@ -13,7 +14,7 @@ mkui  /Users/you/project/Makefile
   clean
   main.o
 
-  ↑/↓ move · enter run · / filter · q quit   5/5
+  up/down move · enter run · a args · / filter · q quit   5/5
 ```
 
 ## Install
@@ -35,8 +36,13 @@ go install github.com/osmangoninahid/mkui@latest
 | `↑`/`↓`/`j`/`k` | Move                        |
 | `/`           | Filter by name or description |
 | `enter`       | Run the selected target       |
+| `a`           | Run with `VAR=value` overrides |
 | `g` / `G`     | Jump to top / bottom          |
 | `q`           | Quit                          |
+
+Pressing `a` opens a prompt where you can type `VAR=value` overrides before
+running, e.g. `PREFIX=/opt DEBUG=1`. The variables the makefile itself defines
+are listed as a hint. Plain `enter` still runs with no overrides.
 
 `mkui --list` prints targets as TSV instead of opening the TUI, so it composes
 with other tools:
@@ -44,6 +50,9 @@ with other tools:
 ```sh
 mkui --list | fzf | cut -f1 | xargs make
 ```
+
+Other flags: `--brand` uses accent colors instead of terminal-native ones, and
+`--version` prints the version and exits.
 
 ## Documenting targets
 
@@ -70,31 +79,6 @@ Known gap: `##` descriptions are only read from the top-level makefile, so a
 documented target defined in an `include`d file shows up in the list without
 its description. Fixing it means following `include` directives, or reading the
 `from '<file>', line N` annotations make already prints in the database.
-
-## Releasing
-
-Tagging triggers GoReleaser, which builds darwin/linux × amd64/arm64 binaries,
-attaches them to a GitHub release, and opens a commit on your tap repo.
-
-One-time setup:
-
-1. Create a public `homebrew-tap` repo under your account, or reuse an existing
-   one — a single tap can host many tools' casks and formulas.
-2. Create a classic PAT with `repo` scope on the tap.
-3. Add it to this repo as the `HOMEBREW_TAP_GITHUB_TOKEN` secret.
-
-Then:
-
-```sh
-git tag -a v0.1.0 -m "first release"
-git push origin v0.1.0
-```
-
-Test the config without publishing first:
-
-```sh
-goreleaser release --snapshot --clean
-```
 
 ## Colors and theming
 
